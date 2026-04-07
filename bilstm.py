@@ -4,6 +4,8 @@ from collections import Counter
 from gensim.models import Word2Vec
 from sympy.printing.pytorch import torch
 from torch import nn
+from torch.utils.data import Dataset
+from sklearn.metrics import f1_score
 
 for f in ['test.tsv']:
     tar = open('tar-' + f, 'w')
@@ -69,14 +71,51 @@ class LSTM(nn.Module):
     def __init__(self,vocab_size,embedding_dim,hideen_dim,num_classes,embedding_matrix):
         super(LSTM, self).__init__()
         self.embedding = nn.Embedding(vocab_size,embedding_dim)
-        self.embedding.weight.data.copy_(torch.tenser(embedding_matrix,dtype=torch.float))
+        self.embedding.weight.data.copy_(torch.tensor(embedding_matrix,dtype=torch.float))
         self.lstm = nn.LSTM(embedding_dim,hideen_dim,batch_first=True,bidirectional=True)
         self.fc = nn.Linear(hideen_dim*2,num_classes)
-        def forward(self,x):
-            x = self.embedding(x)
-            out,(h_n,c_n) = self.lstm(x)
-            forward_last = h_n[-2]
-            backward_last = h_n[-1]
-            out = torch.cat((forward_last,backward_last),1)
-            out = self.fc(out)
-            return out
+    def forward(self,x):
+        x = self.embedding(x)
+        out,(h_n,c_n) = self.lstm(x)
+        forward_last = h_n[-2]
+        backward_last = h_n[-1]
+        out = torch.cat((forward_last,backward_last),1)
+        out = self.fc(out)
+        return out
+class TextDataset(Dataset):
+    def __init__(self,sentence,labels):
+        self.sentence = torch.tensor(sentence,dtype=torch.long)
+        self.labels = torch.tensor(labels,dtype=torch.long)
+    def __len__(self):
+        return len(self.sentence)
+train_dataset = TextDataset(df_train['sentence'],df_train['label'].values)
+dev_dataset = TextDataset(df_dev['sentence'],df_dev['label'].values)
+train_loader = torch.utils.data.DataLoader(dataset=train_dataset,batch_size=32,shuffle=True)
+dev_loader = torch.utils.data.DataLoader(dataset=dev_dataset,batch_size=32,shuffle=True)
+def train(model,train_loader,dev_loader,epochs=5,lr=0.001,print_step=100,print_loss=True,device=torch.device('cpu')):
+    model.to(device)
+    criterion = nn.CrossEntropyLoss()
+    optimizer = torch.optim.Adam(model.parameters(),lr=lr)
+    for epoch in range(epochs):
+        model.train()
+        total_loss = 0
+        for x,y in train_loader:
+            x,y = x.to(device),y.to(device)
+            optimizer.zero_grad()
+            outputs = model(x)
+            loss = criterion(outputs,y)
+            loss.backward()
+            optimizer.step()
+            total_loss += loss.item()
+        model.eval()
+        all_preds,all_labels = [],[]
+        with torch.no_grad():
+            for x,y in dev_loader:
+                x,y = x.to(device),y.to(device)
+                outputs = model(x)
+                preds = torch.argmax(outputs,dim=1)
+                all_preds.extend(preds.cpu().numpy())
+                all_labels.extend(y.cpu().numpy())
+        f1 = f1_score(all_labels,all_preds,average='macro')
+        print(f"epoch{epoch+1}/{epochs} - Loss:{total_loss/len(train_loader):.4f} -Dev F1:{f1:.4f}")
+
