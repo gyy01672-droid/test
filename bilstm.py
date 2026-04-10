@@ -61,7 +61,12 @@ def embedding(vocab,w2v_model):
     embedding_dim = w2v_model.vector_size
     embedding_matrix = np.zeros((vocab_size, embedding_dim))
     for word, idx in vocab.items():
-        embedding_matrix[idx] = w2v_model[word]
+        if word =="<pad>":
+            continue
+        if word in w2v_model.wv:
+            embedding_matrix[idx] = w2v_model.wv[word]
+        else:
+            embedding_matrix[idx] = np.zeros(embedding_dim)
     return embedding_matrix
 train_embedding = embedding(train_vocab,train_w2v_model)
 dev_embedding = embedding(dev_vocab,dev_w2v_model)
@@ -88,10 +93,12 @@ class TextDataset(Dataset):
         self.labels = torch.tensor(labels,dtype=torch.long)
     def __len__(self):
         return len(self.sentence)
-train_dataset = TextDataset(df_train['sentence'],df_train['label'].values)
-dev_dataset = TextDataset(df_dev['sentence'],df_dev['label'].values)
+    def __getitem__(self, idx):
+        return self.sentence[idx],self.labels[idx]
+train_dataset = TextDataset(train_ids,df_train['label'].values)
+dev_dataset = TextDataset(dev_ids,df_dev['label'].values)
 train_loader = torch.utils.data.DataLoader(dataset=train_dataset,batch_size=32,shuffle=True)
-dev_loader = torch.utils.data.DataLoader(dataset=dev_dataset,batch_size=32,shuffle=True)
+dev_loader = torch.utils.data.DataLoader(dataset=dev_dataset,batch_size=32,shuffle=False)
 def train(model,train_loader,dev_loader,epochs=5,lr=0.001,print_step=100,print_loss=True,device=torch.device('cpu')):
     model.to(device)
     criterion = nn.CrossEntropyLoss()
@@ -119,3 +126,10 @@ def train(model,train_loader,dev_loader,epochs=5,lr=0.001,print_step=100,print_l
         f1 = f1_score(all_labels,all_preds,average='macro')
         print(f"epoch{epoch+1}/{epochs} - Loss:{total_loss/len(train_loader):.4f} -Dev F1:{f1:.4f}")
 
+vocab_size = len(train_vocab)
+embedding_dim = train_embedding.shape[1]
+hideen_dim = 128
+num_classes = 2
+model = LSTM(vocab_size,embedding_dim,hideen_dim,num_classes,train_embedding)
+device = torch.device('cpu')
+train(model,train_loader,dev_loader,device=device)
