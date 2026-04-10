@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+import swanlab
 from collections import Counter
 from gensim.models import Word2Vec
 from sympy.printing.pytorch import torch
@@ -99,6 +100,9 @@ train_dataset = TextDataset(train_ids,df_train['label'].values)
 dev_dataset = TextDataset(dev_ids,df_dev['label'].values)
 train_loader = torch.utils.data.DataLoader(dataset=train_dataset,batch_size=32,shuffle=True)
 dev_loader = torch.utils.data.DataLoader(dataset=dev_dataset,batch_size=32,shuffle=False)
+#swanlab初始化
+run = swanlab.init(project="bilstm",experiment_name="bilstm",config={"hidden_dim":128,"learning_rate":0.001,"epochs":5,"batch_size":32,"embedding_dim":128,"max_len":20})
+#定义训练函数
 def train(model,train_loader,dev_loader,epochs=5,lr=0.001,print_step=100,print_loss=True,device=torch.device('cpu')):
     model.to(device)
     criterion = nn.CrossEntropyLoss()
@@ -124,6 +128,7 @@ def train(model,train_loader,dev_loader,epochs=5,lr=0.001,print_step=100,print_l
                 all_preds.extend(preds.cpu().numpy())
                 all_labels.extend(y.cpu().numpy())
         f1 = f1_score(all_labels,all_preds,average='macro')
+        swanlab.log({"loss":total_loss/len(train_loader),"f1":f1})
         print(f"epoch{epoch+1}/{epochs} - Loss:{total_loss/len(train_loader):.4f} -Dev F1:{f1:.4f}")
 
 vocab_size = len(train_vocab)
