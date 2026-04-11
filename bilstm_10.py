@@ -3,6 +3,7 @@ import re
 import numpy as np
 import pandas as pd
 import swanlab
+import torch
 from collections import Counter
 from gensim.models import Word2Vec
 from sympy.printing.pytorch import torch
@@ -11,6 +12,10 @@ from torch.utils.data import Dataset
 from sklearn.metrics import f1_score
 from sklearn.metrics import accuracy_score
 from sklearn.model_selection import train_test_split
+from nltk.tokenize import word_tokenize
+import nltk
+#nltk.download('punkt', quiet=True)
+#nltk.download('punkt_tab', quiet=True)
 #整理数据
 
 def readdata(filename):
@@ -33,9 +38,8 @@ except ValueError as e:
     df_train,df_dev = train_test_split(df_train,test_size=0.2,random_state=42,stratify=None)
 #分词函数
 def tokenize(sentence):
-    sentence = sentence.lower()
-    sentence = sentence.split()
-    return sentence
+    sentnece = str(sentence).lower().strip()
+    return word_tokenize(sentence)
 #创建词库函数
 def vocab(sentence):
     counter = Counter()
@@ -50,7 +54,7 @@ train_vocab = vocab(df_train['Text'])
 dev_vocab = train_vocab
 test_vocab = train_vocab
 #字符编码
-def encoder(sentence,vocab,max_len=20):
+def encoder(sentence,vocab,max_len=50):
     tokens = tokenize(sentence)
     ids = [vocab.get(token,0) for token in tokens]
     if len(ids) < max_len:
@@ -66,7 +70,8 @@ train_tokens = [tokenize(s)for s in df_train['Text']]
 dev_tokens = [tokenize(s)for s in df_dev['Text']]
 test_tokens = [tokenize(s)for s in df_test['Text']]
 #Word2Vec
-train_w2v_model = Word2Vec(sentences=train_tokens,vector_size=100,window=5,min_count=1,workers=4)
+all_tokens = train_tokens + dev_tokens + test_tokens
+train_w2v_model = Word2Vec(sentences=all_tokens,vector_size=300,window=5,min_count=2,workers=4,epochs=20)
 dev_w2v_model = train_w2v_model
 test_w2v_model = train_w2v_model
 #embedding
@@ -86,17 +91,19 @@ train_embedding = embedding(train_vocab,train_w2v_model)
 dev_embedding = embedding(dev_vocab,dev_w2v_model)
 test_embedding = embedding(test_vocab,test_w2v_model)
 #统一定义超参数
-hidden_dim = 128
+hidden_dim = 256
 dropout_rate = 0.5
 batch_size = 32
-learning_rate = 0.0005
-epochs = 10
-max_len = 20
+learning_rate = 0.001
+epochs = 20
+max_len = 50
+mini_count = 2
 #lstm
 class LSTM(nn.Module):
     def __init__(self,vocab_size,embedding_dim,hideen_dim,num_classes,embedding_matrix,dropout_rate):
         super(LSTM, self).__init__()
         self.embedding = nn.Embedding(vocab_size,embedding_dim)
+        self.embedding.weight.requires_grad=True
         self.embedding.weight.data.copy_(torch.tensor(embedding_matrix,dtype=torch.float))
         self.lstm = nn.LSTM(embedding_dim,hideen_dim,batch_first=True,bidirectional=True)
         self.dropout = nn.Dropout(dropout_rate)
