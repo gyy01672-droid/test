@@ -15,28 +15,20 @@ from sklearn.metrics import accuracy_score
 from sklearn.model_selection import train_test_split
 from nltk.tokenize import word_tokenize
 import nltk
-#nltk.download('punkt', quiet=True)
-#nltk.download('punkt_tab', quiet=True)
+nltk.download('punkt', quiet=True)
+nltk.download('punkt_tab', quiet=True)
 #整理数据
 
-def readdata(filename):
-    df=pd.read_csv(filename,sep=None,engine='python')
-    df.columns = [c.strip() for c in df.columns]
-    df = df[['Text','Label']]
-    df['Text'] = df['Text'].astype(str).str.lower().str.strip()
-    df['Label'] = df['Label'].astype(str).str.strip()
-    return df
-df_train = readdata('train.csv')
-df_test = readdata('test.csv')
-unique_labels = sorted(df_train['Label'].unique())
-label_map = {label: idx for idx, label in enumerate(unique_labels)}
-df_train['label'] = df_train['Label'].map(label_map).astype(int)
-df_test['label'] = df_test['Label'].map(label_map).fillna(0).astype(int)
-#划分验证集
-try:
-    df_train,df_dev = train_test_split(df_train,test_size=0.2,random_state=42,stratify=df_train['label'])
-except ValueError as e:
-    df_train,df_dev = train_test_split(df_train,test_size=0.2,random_state=42,stratify=None)
+for f in ['test.tsv']:
+    tar = open('tar-' + f, 'w')
+    tar.write('sentence\tlabel\n')
+    for line in open(f).readlines():
+        label = line[0]
+        tar.write(line[2:].rstrip() + '\t' + label + '\n')
+
+df_train = pd.read_csv('train.tsv', sep='\t')
+df_dev = pd.read_csv('dev.tsv', sep='\t')
+df_test = pd.read_csv('tar-test.tsv', sep='\t')
 #分词函数
 def tokenize(sentence):
     sentence = str(sentence).lower().strip()
@@ -51,7 +43,7 @@ def vocab(sentence):
     vocab["<pad>"]=0
     return vocab
 #创建词库
-train_vocab = vocab(df_train['Text'])
+train_vocab = vocab(df_train['sentence'])
 dev_vocab = train_vocab
 test_vocab = train_vocab
 #字符编码
@@ -63,13 +55,13 @@ def encoder(sentence,vocab,max_len=100):
     else:
         ids = ids[:max_len]
     return ids
-train_ids = [encoder(s,train_vocab)for s in df_train['Text']]
-dev_ids = [encoder(s,train_vocab)for s in df_dev['Text']]
-test_ids = [encoder(s,test_vocab)for s in df_test['Text']]
+train_ids = [encoder(s,train_vocab)for s in df_train['sentence']]
+dev_ids = [encoder(s,train_vocab)for s in df_dev['sentence']]
+test_ids = [encoder(s,test_vocab)for s in df_test['sentence']]
 
-train_tokens = [tokenize(s)for s in df_train['Text']]
-dev_tokens = [tokenize(s)for s in df_dev['Text']]
-test_tokens = [tokenize(s)for s in df_test['Text']]
+train_tokens = [tokenize(s)for s in df_train['sentence']]
+dev_tokens = [tokenize(s)for s in df_dev['sentence']]
+test_tokens = [tokenize(s)for s in df_test['sentence']]
 #Word2Vec
 all_tokens = train_tokens + dev_tokens + test_tokens
 train_w2v_model = Word2Vec(sentences=all_tokens,vector_size=300,window=5,min_count=2,workers=4,epochs=20)
