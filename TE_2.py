@@ -149,7 +149,7 @@ test_loader = torch.utils.data.DataLoader(dataset=test_dataset,batch_size=32,shu
 #swanlab初始化
 run = swanlab.init(project="TE",experiment_name="TE",config={"hidden_dim":hidden_dim,"learning_rate":learning_rate,"epochs":epochs,"batch_size":batch_size,"max_len":max_len,"num_layers":num_layers,"nhead":nhead})
 #定义训练函数
-def train(model,train_loader,dev_loader,test_loader,epochs=epochs,lr=learning_rate,print_step=100,print_loss=True,device=torch.device('cpu')):
+def train(model,train_loader,dev_loader,test_loader,epochs=epochs,lr=learning_rate,print_step=100,print_loss=True,device=torch.device('cuda')):
     optimizer = torch.optim.Adam(model.parameters(),lr=lr)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer,mode='min',factor=0.5,patience=3,min_lr=1e-7)
     model.to(device)
@@ -198,5 +198,5 @@ vocab_size = len(train_vocab)
 embedding_dim = train_embedding.shape[1]
 num_classes = 7
 model = Transformer(vocab_size,embedding_dim,num_classes,hidden_dim,num_layers,nhead,dropout_rate)
-device = torch.device('cpu')
+device = torch.device('cuda')
 train(model,train_loader,dev_loader,test_loader,device=device)
