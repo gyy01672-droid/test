@@ -1,10 +1,14 @@
 import os
 os.environ['HF_ENDPOINT'] = 'https://hf-mirror.com'
+os.environ["TRANSFORMERS_OFFLINE"] = "1"
+os.environ["HF_HUB_OFFLINE"] = "1"
+os.environ["HF_DATASETS_OFFLINE"] = "1"
 import torch
 import pandas as pd
 from datasets import Dataset
 from transformers import AutoTokenizer,AutoModelForCausalLM,TrainingArguments,Trainer
 from peft import LoraConfig,get_peft_model
+from transformers import LlamaTokenizer,LlamaForCausalLM
 import swanlab
 import re
 from sklearn.metrics import f1_score
@@ -36,16 +40,19 @@ train_dataset = Dataset.from_dict({'text': train_texts})
 dev_texts = [build_prompt(s,l)for s,l in zip(df_dev['sentence'],df_dev['label'])]
 model_name="Qwen/Qwen2-7B-Instruct"
 #tokenizer
-tokenizer = AutoTokenizer.from_pretrained('meta-llama/Llama-3.1-8B-Instruct',use_fast=False)
+tokenizer = LlamaTokenizer.from_pretrained('/root/autodl-fs/llama-3.1-8b-instruct', use_fast=False, local_files_only=True)
 #padding
 tokenizer.pad_token = tokenizer.eos_token
 def tokenize(example):
-    return tokenizer(example['text'], truncation=True,padding="max_length", max_length=256)
+    tokens = tokenizer(example['text'], truncation=True,padding="max_length", max_length=256)
+    tokens['labels'] = tokens["input_ids"].copy()
+    return tokens
 train_dataset = train_dataset.map(tokenize, batched=True)
-dev_dataset = train_dataset.map(tokenize, batched=True)
-model = AutoModelForCausalLM.from_pretrained('meta-llama/Llama-3.1-8B-Instruct',load_in_4bit=False,torch_dtype=torch.float16,device='cuda')
+dev_dataset = Dataset.from_dict({'text': dev_texts})
+dev_dataset = dev_dataset.map(tokenize, batched=True)
+model = LlamaForCausalLM.from_pretrained('/root/autodl-fs/llama-3.1-8b-instruct', local_files_only=True,dtype=torch.float16,low_cpu_mem_usage=True, device_map='auto')
 #配置lora
-lora_config = LoraConfig(r=16,lora_alpha=32,traget_modules=["q_proj","v_proj"],lora_dropput = 0.1,bias="none",task_type="CAUSAL_LM")
+lora_config = LoraConfig(r=16,lora_alpha=32,target_modules=["q_proj","v_proj"],lora_dropout = 0.1,bias="none",task_type="CAUSAL_LM")
 model = get_peft_model(model,lora_config)
 model.print_trainable_parameters()
 #swanlab
@@ -53,13 +60,22 @@ run = swanlab.init(project="model",experiment_name="model")
 #训练参数
 training_args = TrainingArguments(
     output_dir="./llama-lara",
-    per_device_train_batch_size=2,
-    gradient_accumulation_steps=8,
+    per_device_train_batch_size=4,
+    gradient_accumulation_steps=2,
     num_train_epochs=3,
     learning_rate=2e-4,
-    save_steps=10,
-    fp16=False,
-    report_to=[]
+    save_steps=100,
+    fp16=True,
+    bf16=False,
+    gradient_checkpointing=True,
+    optim="paged_adamw_8bit",
+    save_total_limit=3,
+    report_to="swanlab",
+    dataloader_num_workers=0,
+    max_grad_norm=0.3,
+    warmup_ratio=0.03,
+    logging_steps=5,
+    weight_decay=0.01,
 )
 #训练
 trainer = Trainer(
@@ -91,11 +107,10 @@ def evaluate(df):
     acc = accuracy_score(labels,preds)
     f1 = f1_score(labels,preds,average='macro')
     return acc,f1
-for epoch in range(int(training_args.num_train_epochs)):
-    trainer.train()
-    dev_acc,dev_f1 = evaluate(dev_dataset)
-    print(f"epoch{epoch + 1}|Dev Acc  {dev_acc:.4f}|Dev F1 = {dev_f1:.4f}")
-    swanlab.log({"dev_f1": dev_f1})
+
+trainer.train()
+dev_acc,dev_f1 = evaluate(df_dev)
+swanlab.log({"dev_f1": dev_f1})
 #测试
 model.eval()
 all_preds = []
