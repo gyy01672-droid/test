@@ -31,6 +31,7 @@ def build_prompt(sentence,label=None):
     ###Input:
     {sentence}
     ###Response:
+    The label is {label}
 """
     if label is not None:
         prompt += str(label)
@@ -44,15 +45,47 @@ tokenizer = LlamaTokenizer.from_pretrained('/root/autodl-fs/llama-3.1-8b-instruc
 #padding
 tokenizer.pad_token = tokenizer.eos_token
 def tokenize(example):
-    tokens = tokenizer(example['text'], truncation=True,padding="max_length", max_length=256)
-    tokens['labels'] = tokens["input_ids"].copy()
-    return tokens
+    texts = example['text']
+    tokenized = tokenizer(
+        texts,
+        truncation=True,
+        padding="max_length",
+        max_length=256
+    )
+
+    labels = []
+
+    for i, text in enumerate(texts):
+        input_ids = tokenized["input_ids"][i]
+        label_ids = input_ids.copy()
+
+        # 用 tokenizer 找 Response token位置
+        response_tokens = tokenizer("###Response:", add_special_tokens=False)["input_ids"]
+
+        # 在 input_ids 中找子序列
+        def find_sublist(lst, sub):
+            for j in range(len(lst) - len(sub)):
+                if lst[j:j + len(sub)] == sub:
+                    return j + len(sub)
+            return -1
+
+        start = find_sublist(input_ids, response_tokens)
+
+        if start == -1:
+            label_ids = [-100] * len(label_ids)
+        else:
+            label_ids[:start] = [-100] * start
+
+        labels.append(label_ids)
+
+    tokenized["labels"] = labels
+    return tokenized
 train_dataset = train_dataset.map(tokenize, batched=True)
 dev_dataset = Dataset.from_dict({'text': dev_texts})
 dev_dataset = dev_dataset.map(tokenize, batched=True)
 model = LlamaForCausalLM.from_pretrained('/root/autodl-fs/llama-3.1-8b-instruct', local_files_only=True,dtype=torch.float16,low_cpu_mem_usage=True, device_map='auto')
 #配置lora
-lora_config = LoraConfig(r=16,lora_alpha=32,target_modules=["q_proj","v_proj"],lora_dropout = 0.1,bias="none",task_type="CAUSAL_LM")
+lora_config = LoraConfig(r=16,lora_alpha=32,target_modules=["q_proj","k_proj","v_proj","o_proj"],lora_dropout = 0.1,bias="none",task_type="CAUSAL_LM")
 model = get_peft_model(model,lora_config)
 model.print_trainable_parameters()
 #swanlab
@@ -63,7 +96,7 @@ training_args = TrainingArguments(
     per_device_train_batch_size=4,
     gradient_accumulation_steps=2,
     num_train_epochs=3,
-    learning_rate=2e-4,
+    learning_rate=5e-5,
     save_steps=100,
     fp16=True,
     bf16=False,
@@ -91,7 +124,7 @@ def predict(sentence):
     return text
 #提取标签
 def extract_label(text):
-    match = re.search(r"Response:\s*(\d+)",text)
+    match = re.search(r"label is (\d+)",text)
     if match:
         return int(match.group(1))
     else:
